@@ -22,6 +22,7 @@ ui-tui/packages/hermes-ink/dist/
 .env
 
 *.md
+!docker/SOUL.md
 
 # Runtime data (bind-mounted at /opt/data; must not leak into build context)
 data/

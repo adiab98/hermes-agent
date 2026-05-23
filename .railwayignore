@@ -6,6 +6,5 @@ infographic/
 plans/
 tests/
 website/
-*.md
 testlogs/
 .pytest_cache/
