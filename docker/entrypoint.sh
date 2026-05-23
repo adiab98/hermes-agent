@@ -151,7 +151,7 @@ start_tailscale() {
         sleep 0.25
     done
 
-    ts_up_args=(--hostname "$ts_hostname" --accept-dns=false)
+    ts_up_args=(--reset --hostname "$ts_hostname" --accept-dns=false)
     if [ -n "$ts_authkey" ]; then
         ts_up_args+=(--auth-key "$ts_authkey")
     fi
