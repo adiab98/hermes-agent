@@ -1,5 +1,6 @@
 FROM ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie@sha256:b3c543b6c4f23a5f2df22866bd7857e5d304b67a564f4feab6ac22044dde719b AS uv_source
 FROM tianon/gosu:1.19-trixie@sha256:3b176695959c71e123eb390d427efc665eeb561b1540e82679c15e992006b8b9 AS gosu_source
+FROM tailscale/tailscale:v1.98.3@sha256:854b77123b9536adae2e97f5a5fdb1790ed03438b911ab7f07780155e0af6ce2 AS tailscale_source
 FROM debian:13.4
 
 # Disable Python stdout buffering to ensure logs are printed immediately
@@ -22,6 +23,8 @@ RUN useradd -u 10000 -m -d /opt/data hermes
 
 COPY --chmod=0755 --from=gosu_source /gosu /usr/local/bin/
 COPY --chmod=0755 --from=uv_source /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
+COPY --chmod=0755 --from=tailscale_source /usr/local/bin/tailscale /usr/local/bin/tailscale
+COPY --chmod=0755 --from=tailscale_source /usr/local/bin/tailscaled /usr/local/bin/tailscaled
 
 WORKDIR /opt/hermes
 

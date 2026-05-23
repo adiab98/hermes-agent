@@ -107,6 +107,90 @@ if [ -d "$INSTALL_DIR/skills" ]; then
     python3 "$INSTALL_DIR/tools/skills_sync.py"
 fi
 
+tailscale_started=false
+start_tailscale() {
+    case "${HERMES_TAILSCALE:-}" in
+        1|true|TRUE|True|yes|YES|Yes) ;;
+        *)
+            if [ -z "${TS_AUTHKEY:-${TAILSCALE_AUTHKEY:-}}" ]; then
+                return
+            fi
+            ;;
+    esac
+
+    if ! command -v tailscaled >/dev/null 2>&1 || ! command -v tailscale >/dev/null 2>&1; then
+        echo "Warning: HERMES_TAILSCALE requested but tailscale binaries are unavailable"
+        return
+    fi
+
+    ts_state_dir="${TS_STATE_DIR:-$HERMES_HOME/tailscale}"
+    ts_socket="${TS_SOCKET:-$ts_state_dir/tailscaled.sock}"
+    ts_authkey="${TS_AUTHKEY:-${TAILSCALE_AUTHKEY:-}}"
+    ts_hostname="${TS_HOSTNAME:-${TAILSCALE_HOSTNAME:-hermes}}"
+
+    mkdir -p "$ts_state_dir"
+    export TS_SOCKET="$ts_socket"
+
+    if [ -z "$ts_authkey" ] && [ ! -f "$ts_state_dir/tailscaled.state" ]; then
+        echo "Warning: HERMES_TAILSCALE requested but no TS_AUTHKEY/TAILSCALE_AUTHKEY or saved state was found"
+        return
+    fi
+
+    echo "Starting tailscaled in userspace networking mode"
+    tailscaled \
+        --tun=userspace-networking \
+        --socket="$ts_socket" \
+        --state="$ts_state_dir/tailscaled.state" \
+        ${TS_DAEMON_EXTRA_ARGS:-} &
+    tailscaled_pid=$!
+
+    for _ in $(seq 1 40); do
+        if [ -S "$ts_socket" ]; then
+            break
+        fi
+        sleep 0.25
+    done
+
+    ts_up_args=(--hostname "$ts_hostname" --accept-dns=false)
+    if [ -n "$ts_authkey" ]; then
+        ts_up_args+=(--auth-key "$ts_authkey")
+    fi
+    if [ -n "${TS_EXTRA_ARGS:-}" ]; then
+        # shellcheck disable=SC2206
+        extra_args=(${TS_EXTRA_ARGS})
+        ts_up_args+=("${extra_args[@]}")
+    fi
+
+    if tailscale --socket="$ts_socket" up "${ts_up_args[@]}"; then
+        tailscale_started=true
+        echo "Tailscale connected as ${ts_hostname}"
+    else
+        echo "Warning: tailscale up failed; dashboard will continue without Tailnet serve"
+        kill "$tailscaled_pid" 2>/dev/null || true
+    fi
+}
+
+configure_tailscale_serve() {
+    case "${HERMES_TAILSCALE_SERVE:-}" in
+        1|true|TRUE|True|yes|YES|Yes) ;;
+        *) return ;;
+    esac
+
+    if [ "$tailscale_started" != "true" ]; then
+        echo "Warning: HERMES_TAILSCALE_SERVE requested but Tailscale is not connected"
+        return
+    fi
+
+    serve_port="${HERMES_TAILSCALE_SERVE_PORT:-80}"
+    serve_target="${HERMES_TAILSCALE_SERVE_TARGET:-http://127.0.0.1:${dash_port:-9119}}"
+
+    echo "Publishing Hermes dashboard to tailnet: http://<tailscale-node>:${serve_port} -> ${serve_target}"
+    tailscale --socket="$TS_SOCKET" serve --bg --http "$serve_port" "$serve_target" || \
+        echo "Warning: tailscale serve failed"
+}
+
+start_tailscale
+
 # Optionally start `hermes dashboard` as a side-process.
 #
 # Toggled by HERMES_DASHBOARD=1 (also accepts "true"/"yes", case-insensitive).
@@ -139,6 +223,7 @@ case "${HERMES_DASHBOARD:-}" in
             stdbuf -oL -eL hermes dashboard "${dash_args[@]}" 2>&1 \
                 | sed -u 's/^/[dashboard] /'
         ) &
+        configure_tailscale_serve
         ;;
 esac
 
