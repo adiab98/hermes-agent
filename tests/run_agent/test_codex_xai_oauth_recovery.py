@@ -7,7 +7,7 @@ Three distinct failure modes the user community hit during rollout:
    Responses streaming state machine collapses an upstream ``error`` SSE
    frame into a generic stream-ordering error.  ``_run_codex_stream``
    now treats this the same way it already treats the missing
-   ``response.completed`` postlude — fall back to a non-stream
+   ``response.completed`` postlude — fall back to
    ``responses.create(stream=True)`` which surfaces the real provider
    error.  Also closes #8133 (``response.in_progress`` prelude on custom
    relays) and #14634 (``codex.rate_limits`` prelude on codex-lb).
@@ -68,7 +68,7 @@ def _make_codex_agent():
     ],
 )
 def test_codex_stream_prelude_error_falls_back_to_create_stream(prelude_event_type):
-    """The SDK's prelude RuntimeError must trigger the non-stream fallback.
+    """The SDK's prelude RuntimeError must trigger the create-stream fallback.
 
     When the first SSE event isn't ``response.created``, openai-python
     raises RuntimeError before our event loop sees anything.  We must

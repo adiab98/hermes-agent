@@ -47,6 +47,17 @@ _FORWARD_COMPAT_TEMPLATE_MODELS: List[tuple[str, tuple[str, ...]]] = [
 ]
 
 
+def get_codex_model_fallbacks(model: str) -> List[str]:
+    """Return same-provider Codex fallback models for forward-compatible slugs."""
+    normalized = str(model or "").strip()
+    if normalized.startswith("openai/"):
+        normalized = normalized.split("/", 1)[1]
+    for synthetic_model, template_models in _FORWARD_COMPAT_TEMPLATE_MODELS:
+        if normalized == synthetic_model:
+            return list(template_models)
+    return []
+
+
 def _add_forward_compat_models(model_ids: List[str]) -> List[str]:
     """Add Clawdbot-style synthetic forward-compat Codex models.
 

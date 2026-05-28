@@ -510,6 +510,65 @@ class TestStreamingFallback:
 
     @patch("run_agent.AIAgent._create_request_openai_client")
     @patch("run_agent.AIAgent._close_request_openai_client")
+    def test_none_stream_sets_flag_and_raises_clear_error(self, mock_close, mock_create):
+        """A provider returning None for stream=True should not leak NoneType."""
+        from run_agent import AIAgent
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = None
+        mock_create.return_value = mock_client
+
+        agent = AIAgent(
+            api_key="test-key",
+            base_url="https://openrouter.ai/api/v1",
+            model="test/model",
+            quiet_mode=True,
+            skip_context_files=True,
+            skip_memory=True,
+        )
+        agent.api_mode = "chat_completions"
+        agent._interrupt_requested = False
+
+        with pytest.raises(Exception, match="returned no streaming response"):
+            agent._interruptible_streaming_api_call({})
+
+        assert agent._disable_streaming is True
+
+    @patch("run_agent.AIAgent._create_request_openai_client")
+    @patch("run_agent.AIAgent._close_request_openai_client")
+    def test_concrete_response_from_stream_path_is_accepted(self, mock_close, mock_create):
+        """Some OpenAI-compatible adapters ignore stream=True and return a response."""
+        from run_agent import AIAgent
+
+        message = SimpleNamespace(role="assistant", content="ok", tool_calls=None)
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(index=0, message=message, finish_reason="stop")
+            ],
+            usage=None,
+        )
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = response
+        mock_create.return_value = mock_client
+
+        agent = AIAgent(
+            api_key="test-key",
+            base_url="https://openrouter.ai/api/v1",
+            model="test/model",
+            quiet_mode=True,
+            skip_context_files=True,
+            skip_memory=True,
+        )
+        agent.api_mode = "chat_completions"
+        agent._interrupt_requested = False
+
+        result = agent._interruptible_streaming_api_call({})
+
+        assert result is response
+        assert getattr(agent, "_disable_streaming", False) is False
+
+    @patch("run_agent.AIAgent._create_request_openai_client")
+    @patch("run_agent.AIAgent._close_request_openai_client")
     def test_non_transport_error_propagates(self, mock_close, mock_create):
         """Non-transport streaming errors propagate to the main retry loop."""
         from run_agent import AIAgent

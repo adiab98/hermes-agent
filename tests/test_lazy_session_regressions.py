@@ -417,6 +417,44 @@ class TestGatewaySurfacesNullResponse:
 
         assert result == "Hello!"
 
+    def test_failed_nonetype_error_is_sanitized_for_telegram(self):
+        """Provider SDK unwind errors should not leak as raw Python exceptions."""
+        from gateway.run import (
+            _normalize_empty_agent_response,
+            _sanitize_gateway_final_response,
+        )
+
+        agent_result = {
+            "final_response": None,
+            "api_calls": 1,
+            "failed": True,
+            "error": "'NoneType' object is not iterable",
+        }
+
+        response = _normalize_empty_agent_response(
+            agent_result,
+            agent_result.get("final_response") or "",
+            history_len=5,
+        )
+        response = _sanitize_gateway_final_response("telegram", response)
+
+        assert response.startswith("⚠️ The model provider failed after retries")
+        assert "NoneType" not in response
+
+    def test_outer_nonetype_error_is_sanitized_for_telegram(self):
+        """The gateway's outer exception path uses the same safe provider reply."""
+        from gateway.run import _sanitize_gateway_final_response
+
+        response = _sanitize_gateway_final_response(
+            "telegram",
+            "Sorry, I encountered an error (TypeError).\n"
+            "'NoneType' object is not iterable\n"
+            "Try again or use /reset to start a fresh session.",
+        )
+
+        assert response.startswith("⚠️ The model provider failed after retries")
+        assert "NoneType" not in response
+
 
 # ===========================================================================
 # Prune: finalize_orphaned_compression_sessions

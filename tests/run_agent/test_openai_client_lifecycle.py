@@ -107,7 +107,38 @@ def test_stale_non_stream_close_is_single_owner(monkeypatch):
     agent = _build_agent()
     agent._compute_non_stream_stale_timeout = lambda _messages: 0.01
 
-    with pytest.raises(APIConnectionError):
+    with pytest.raises(TimeoutError, match="Non-streaming API call timed out"):
+        agent._interruptible_api_call({"model": agent.model, "messages": []})
+
+    assert request_client.close_calls == 1
+
+
+def test_stale_non_stream_timeout_masks_abort_unwind_type_error(monkeypatch):
+    def slow_responder(**kwargs):
+        time.sleep(0.1)
+        raise TypeError("'NoneType' object is not iterable")
+
+    request_client = FakeRequestClient(slow_responder)
+    factory = OpenAIFactory([request_client])
+    monkeypatch.setattr(run_agent, "OpenAI", factory)
+
+    agent = _build_agent()
+    agent._compute_non_stream_stale_timeout = lambda _messages: 0.01
+
+    with pytest.raises(TimeoutError, match="Non-streaming API call timed out"):
+        agent._interruptible_api_call({"model": agent.model, "messages": []})
+
+    assert request_client.close_calls == 1
+
+
+def test_non_stream_none_response_raises_clear_error(monkeypatch):
+    request_client = FakeRequestClient(lambda **kwargs: None)
+    factory = OpenAIFactory([request_client])
+    monkeypatch.setattr(run_agent, "OpenAI", factory)
+
+    agent = _build_agent()
+
+    with pytest.raises(RuntimeError, match="Provider returned no response"):
         agent._interruptible_api_call({"model": agent.model, "messages": []})
 
     assert request_client.close_calls == 1

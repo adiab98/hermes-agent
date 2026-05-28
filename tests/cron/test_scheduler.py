@@ -1078,6 +1078,29 @@ class TestRunJobSessionPersistence:
         kwargs = mock_agent_cls.call_args.kwargs
         assert kwargs["enabled_toolsets"] == ["terminal"]
 
+    def test_run_job_tolerates_null_provider_routing_config(self, tmp_path):
+        """Cron should treat ``provider_routing: null`` as an empty routing config."""
+        (tmp_path / "config.yaml").write_text("provider_routing:\n", encoding="utf-8")
+        job = {
+            "id": "null-routing-job",
+            "name": "test",
+            "prompt": "hello",
+        }
+        fake_db, patches = self._make_run_job_patches(tmp_path)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+             patch("run_agent.AIAgent") as mock_agent_cls:
+            mock_agent = MagicMock()
+            mock_agent.run_conversation.return_value = {"final_response": "ok"}
+            mock_agent_cls.return_value = mock_agent
+            success, _output, _final_response, error = run_job(job)
+
+        assert success is True
+        assert error is None
+        kwargs = mock_agent_cls.call_args.kwargs
+        assert kwargs["providers_allowed"] is None
+        assert kwargs["providers_ignored"] is None
+        assert kwargs["providers_order"] is None
+
     def test_run_job_empty_response_returns_empty_not_placeholder(self, tmp_path):
         """Empty final_response should stay empty for delivery logic (issue #2234).
 

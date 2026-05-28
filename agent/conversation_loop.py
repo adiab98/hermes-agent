@@ -2756,6 +2756,12 @@ def run_conversation(
                 # provider/network failure (malformed response body,
                 # truncated stream, routing layer corruption), not a
                 # local programming bug, and should be retried (#14782).
+                _api_error_text = str(api_error).lower()
+                _is_provider_unwind_error = (
+                    isinstance(api_error, TypeError)
+                    and "nonetype" in _api_error_text
+                    and "object is not iterable" in _api_error_text
+                )
                 is_local_validation_error = (
                     isinstance(api_error, (ValueError, TypeError))
                     and not isinstance(
@@ -2769,6 +2775,11 @@ def run_conversation(
                     # ssl.SSLError explicitly so the error classifier's
                     # retryable=True mapping takes effect instead.
                     and not isinstance(api_error, ssl.SSLError)
+                    # Some provider SDKs surface failed/empty upstream
+                    # responses as a Python TypeError while unwinding their
+                    # response iterator. Treat that as provider failure so
+                    # normal retry/fallback logic gets a chance.
+                    and not _is_provider_unwind_error
                 )
                 is_client_error = (
                     is_local_validation_error

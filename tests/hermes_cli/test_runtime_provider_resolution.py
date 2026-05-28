@@ -2524,6 +2524,72 @@ def test_openai_key_reaches_openai_host(monkeypatch):
     assert resolved["api_key"] == "sk-openai-secret"
 
 
+def test_explicit_openai_provider_resolves_native_openai(monkeypatch):
+    """provider=openai should be a first-class API-key runtime."""
+    monkeypatch.setattr(rp, "_get_model_config", lambda: {})
+    monkeypatch.setattr(
+        rp,
+        "load_pool",
+        lambda provider: type("P", (), {"has_credentials": lambda self: False})(),
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-secret")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    resolved = rp.resolve_runtime_provider(requested="openai")
+
+    assert resolved["provider"] == "openai"
+    assert resolved["base_url"] == "https://api.openai.com/v1"
+    assert resolved["api_key"] == "sk-openai-secret"
+    assert resolved["api_mode"] == "codex_responses"
+
+
+def test_auto_openai_key_uses_openai_not_openrouter(monkeypatch):
+    """OPENAI_API_KEY alone should not be sent to OpenRouter."""
+    monkeypatch.setattr(rp, "_get_model_config", lambda: {})
+    monkeypatch.setattr(
+        rp,
+        "load_pool",
+        lambda provider: type("P", (), {"has_credentials": lambda self: False})(),
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-secret")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
+
+    resolved = rp.resolve_runtime_provider(requested="auto")
+
+    assert resolved["provider"] == "openai"
+    assert resolved["base_url"] == "https://api.openai.com/v1"
+    assert resolved["api_key"] == "sk-openai-secret"
+
+
+def test_openai_codex_config_beats_openai_api_key(monkeypatch):
+    """OAuth Codex config must not be hijacked by OPENAI_API_KEY."""
+    monkeypatch.setattr(rp, "_get_model_config", lambda: {"provider": "openai-codex"})
+    monkeypatch.setattr(
+        rp,
+        "load_pool",
+        lambda provider: type("P", (), {"has_credentials": lambda self: False})(),
+    )
+    monkeypatch.setattr(
+        rp,
+        "resolve_codex_runtime_credentials",
+        lambda: {
+            "provider": "openai-codex",
+            "base_url": "https://chatgpt.com/backend-api/codex",
+            "api_key": "codex-oauth-token",
+            "source": "hermes-auth-store",
+        },
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-secret")
+
+    resolved = rp.resolve_runtime_provider()
+
+    assert resolved["provider"] == "openai-codex"
+    assert resolved["api_key"] == "codex-oauth-token"
+    assert resolved["base_url"] == "https://chatgpt.com/backend-api/codex"
+
+
 def test_openrouter_key_reaches_openrouter_host(monkeypatch):
     """OPENROUTER_API_KEY must be forwarded when the base_url is openrouter.ai."""
     monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "openrouter")

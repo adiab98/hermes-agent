@@ -1,3 +1,4 @@
+import json
 import sys
 import types
 from types import SimpleNamespace
@@ -445,6 +446,55 @@ def test_run_codex_stream_falls_back_to_create_after_stream_completion_error(mon
     assert response.output[0].content[0].text == "create fallback ok"
 
 
+def test_run_codex_stream_falls_back_to_create_stream_after_none_iter_unwind(monkeypatch):
+    agent = _build_agent(monkeypatch)
+    calls = {"stream": 0, "create": 0}
+    create_stream = _FakeCreateStream(
+        [
+            SimpleNamespace(type="response.created"),
+            SimpleNamespace(type="response.in_progress"),
+            SimpleNamespace(type="response.completed", response=_codex_message_response("create stream ok")),
+        ]
+    )
+
+    def _fake_stream(**kwargs):
+        calls["stream"] += 1
+        raise TypeError("'NoneType' object is not iterable")
+
+    def _fake_create(**kwargs):
+        calls["create"] += 1
+        assert kwargs["stream"] is True
+        return create_stream
+
+    agent.client = SimpleNamespace(
+        responses=SimpleNamespace(
+            stream=_fake_stream,
+            create=_fake_create,
+        )
+    )
+
+    response = agent._run_codex_stream(_codex_request_kwargs())
+    assert calls["stream"] == 2
+    assert calls["create"] == 1
+    assert response.output[0].content[0].text == "create stream ok"
+
+
+def test_run_codex_stream_none_iter_create_stream_none_raises_clear_error(monkeypatch):
+    agent = _build_agent(monkeypatch)
+
+    agent.client = SimpleNamespace(
+        responses=SimpleNamespace(
+            stream=lambda **kwargs: (_ for _ in ()).throw(
+                TypeError("'NoneType' object is not iterable")
+            ),
+            create=lambda **kwargs: None,
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="Provider returned no Codex Responses stream"):
+        agent._run_codex_stream(_codex_request_kwargs())
+
+
 def test_run_codex_stream_fallback_parses_create_stream_events(monkeypatch):
     agent = _build_agent(monkeypatch)
     calls = {"stream": 0, "create": 0}
@@ -479,6 +529,70 @@ def test_run_codex_stream_fallback_parses_create_stream_events(monkeypatch):
     assert calls["create"] == 1
     assert create_stream.closed is True
     assert response.output[0].content[0].text == "streamed create ok"
+
+
+def test_run_codex_stream_fallback_uses_raw_sse_after_create_iter_unwind(monkeypatch):
+    agent = _build_agent(monkeypatch)
+    calls = {"stream": 0, "create": 0, "raw": 0}
+
+    class _BrokenCreateStream:
+        def __iter__(self):
+            raise TypeError("'NoneType' object is not iterable")
+
+        def close(self):
+            pass
+
+    class _FakeRawResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            events = [
+                {"type": "response.output_text.delta", "delta": "raw "},
+                {"type": "response.output_text.delta", "delta": "ok"},
+                {"type": "response.completed", "response": {"output": [], "status": "completed"}},
+            ]
+            for event in events:
+                yield f"data: {json.dumps(event)}"
+                yield ""
+
+    def _fake_stream(**kwargs):
+        calls["stream"] += 1
+        raise TypeError("'NoneType' object is not iterable")
+
+    def _fake_create(**kwargs):
+        calls["create"] += 1
+        assert kwargs["stream"] is True
+        return _BrokenCreateStream()
+
+    def _fake_httpx_stream(method, url, **kwargs):
+        calls["raw"] += 1
+        assert method == "POST"
+        assert url == "https://chatgpt.com/backend-api/codex/responses"
+        assert kwargs["json"]["stream"] is True
+        assert kwargs["headers"]["Authorization"] == "Bearer codex-token"
+        return _FakeRawResponse()
+
+    monkeypatch.setattr("httpx.stream", _fake_httpx_stream)
+    agent.client = SimpleNamespace(
+        base_url="https://chatgpt.com/backend-api/codex",
+        api_key="codex-token",
+        default_headers={"User-Agent": "codex_cli_rs/0.0.0 (Hermes Agent)"},
+        responses=SimpleNamespace(
+            stream=_fake_stream,
+            create=_fake_create,
+        ),
+    )
+
+    response = agent._run_codex_stream(_codex_request_kwargs())
+    assert calls == {"stream": 2, "create": 1, "raw": 1}
+    assert response.output[0].content[0].text == "raw ok"
 
 
 def test_run_conversation_codex_plain_text(monkeypatch):

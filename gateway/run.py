@@ -88,7 +88,14 @@ _TELEGRAM_NOISY_STATUS_RE = re.compile(
 _GATEWAY_PROVIDER_ERROR_RE = re.compile(
     r"("  # infrastructure/provider error preambles, not ordinary assistant prose
     r"api\s+(?:call\s+)?failed"
+    r"|the\s+request\s+failed\s*:"
     r"|provider\s+authentication\s+failed"
+    r"|provider\s+returned\s+no\s+(?:response|streaming\s+response)"
+    r"|stream\s+not\s+supported"
+    r"|non-streaming\s+api\s+call\s+timed\s+out"
+    r"|non-iterable\s+stream\s+response"
+    r"|['\"]?nonetype['\"]?\s+object\s+is\s+not\s+iterable"
+    r"|sorry,\s+i\s+encountered\s+an\s+error\s+\((?:typeerror|timeouterror|runtimeerror|apiconnectionerror|apierror|connecterror)\)"
     r"|non-retryable\s+error"
     r"|rate\s+limited\s+after\s+\d+\s+retries"
     r"|error\s+code\s*:"
@@ -170,7 +177,14 @@ def _gateway_provider_error_reply(text: str) -> str:
 _GATEWAY_PROVIDER_ERROR_SHAPE_RE = re.compile(
     r"^\s*(\W*\s*)?("
     r"api\s+(?:call\s+)?failed"
+    r"|the\s+request\s+failed\s*:"
     r"|provider\s+authentication\s+failed"
+    r"|provider\s+returned\s+no\s+(?:response|streaming\s+response)"
+    r"|stream\s+not\s+supported"
+    r"|non-streaming\s+api\s+call\s+timed\s+out"
+    r"|non-iterable\s+stream\s+response"
+    r"|['\"]?nonetype['\"]?\s+object\s+is\s+not\s+iterable"
+    r"|sorry,\s+i\s+encountered\s+an\s+error\s+\((?:typeerror|timeouterror|runtimeerror|apiconnectionerror|apierror|connecterror)\)"
     r"|non-retryable\s+error"
     r"|rate\s+limited\s+after\s+\d+\s+retries"
     r"|error\s+code\s*:"
@@ -8940,12 +8954,13 @@ class GatewayRunner:
                     )
                 elif status_code == 400:
                     status_hint = " The request was rejected by the API."
-            return (
+            error_reply = (
                 f"Sorry, I encountered an error ({error_type}).\n"
                 f"{error_detail}\n"
                 f"{status_hint}"
                 "Try again or use /reset to start a fresh session."
             )
+            return _sanitize_gateway_final_response(source.platform, error_reply)
         finally:
             # Restore session context variables to their pre-handler state
             self._clear_session_env(_session_env_tokens)

@@ -31,6 +31,42 @@ class TestGetDefaultModelForProvider:
         # Custom providers don't have entries in _PROVIDER_MODELS
         assert get_default_model_for_provider("some-random-custom") == ""
 
+    def test_codex_forward_model_has_builtin_fallbacks(self):
+        """Forward-compatible Codex slugs should fall back to stable templates."""
+        from hermes_cli.codex_models import get_codex_model_fallbacks
+
+        assert get_codex_model_fallbacks("gpt-5.5") == [
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.3-codex",
+        ]
+
+    def test_openai_codex_agent_uses_builtin_model_fallbacks(self):
+        """An openai-codex agent without explicit fallback gets a Codex chain."""
+        from run_agent import AIAgent
+
+        with (
+            patch("run_agent.get_tool_definitions", return_value=[]),
+            patch("run_agent.check_toolset_requirements", return_value={}),
+            patch("run_agent.OpenAI"),
+        ):
+            agent = AIAgent(
+                provider="openai-codex",
+                api_mode="codex_responses",
+                api_key="test-key-1234567890",
+                base_url="https://chatgpt.com/backend-api/codex",
+                model="gpt-5.5",
+                quiet_mode=True,
+                skip_context_files=True,
+                skip_memory=True,
+            )
+
+        assert [entry["model"] for entry in agent._fallback_chain] == [
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.3-codex",
+        ]
+
 
 class TestGatewayEmptyModelFallback:
     """Test that _resolve_session_agent_runtime fills in empty model from provider catalog."""

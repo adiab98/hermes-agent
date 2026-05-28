@@ -3692,6 +3692,28 @@ class TestRetryExhaustion:
         assert "error" in result
         assert "rate limited" in result["error"]
 
+    def test_provider_unwind_nonetype_typeerror_is_retried(self, agent):
+        """Provider iterator unwind TypeError should use retry path, not local-bug abort."""
+        self._setup_agent(agent)
+        agent.client.chat.completions.create.side_effect = TypeError(
+            "'NoneType' object is not iterable"
+        )
+        from agent import conversation_loop as _conv_loop
+        with (
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+            patch("run_agent.time", self._make_fast_time_mock()),
+            patch.object(_conv_loop, "time", self._make_fast_time_mock()),
+            patch.object(_conv_loop, "jittered_backoff", lambda *a, **k: 0.0),
+        ):
+            result = agent.run_conversation("hello")
+
+        assert result.get("completed") is False
+        assert result.get("failed") is True
+        assert agent.client.chat.completions.create.call_count > 1
+        assert "'NoneType' object is not iterable" in result["error"]
+
     def test_build_api_kwargs_error_no_unbound_local(self, agent):
         """When _build_api_kwargs raises, except handler must not crash with UnboundLocalError.
 

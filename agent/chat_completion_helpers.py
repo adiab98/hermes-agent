@@ -210,6 +210,7 @@ def interruptible_api_call(agent, api_kwargs: dict):
     t = threading.Thread(target=_call, daemon=True)
     t.start()
     _poll_count = 0
+    _stale_error = None
     while t.is_alive():
         t.join(timeout=0.3)
         _poll_count += 1
@@ -249,13 +250,14 @@ def interruptible_api_call(agent, api_kwargs: dict):
             agent._touch_activity(
                 f"stale non-streaming call killed after {int(_elapsed)}s"
             )
+            _stale_error = TimeoutError(
+                f"Non-streaming API call timed out after {int(_elapsed)}s "
+                f"with no response (threshold: {int(_stale_timeout)}s)"
+            )
             # Wait briefly for the thread to notice the closed connection.
             t.join(timeout=2.0)
             if result["error"] is None and result["response"] is None:
-                result["error"] = TimeoutError(
-                    f"Non-streaming API call timed out after {int(_elapsed)}s "
-                    f"with no response (threshold: {int(_stale_timeout)}s)"
-                )
+                result["error"] = _stale_error
             break
 
         if agent._interrupt_requested:
@@ -271,8 +273,12 @@ def interruptible_api_call(agent, api_kwargs: dict):
             except Exception:
                 pass
             raise InterruptedError("Agent interrupted during API call")
+    if _stale_error is not None:
+        raise _stale_error
     if result["error"] is not None:
         raise result["error"]
+    if result["response"] is None:
+        raise RuntimeError("Provider returned no response")
     return result["response"]
 
 
@@ -1430,6 +1436,18 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
 
         # Log OpenRouter response cache status when present.
         agent._check_openrouter_cache_status(getattr(stream, "response", None))
+
+        if stream is None:
+            raise RuntimeError(
+                "stream not supported: provider returned no streaming response"
+            )
+        if hasattr(stream, "choices"):
+            return stream
+        if not hasattr(stream, "__iter__"):
+            raise RuntimeError(
+                "stream not supported: provider returned a non-iterable "
+                f"stream response ({type(stream).__name__})"
+            )
 
         content_parts: list = []
         tool_calls_acc: dict = {}

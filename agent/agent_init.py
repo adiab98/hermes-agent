@@ -892,6 +892,16 @@ def init_agent(
         agent._fallback_chain = [fallback_model]
     else:
         agent._fallback_chain = []
+    if not agent._fallback_chain and agent.provider == "openai-codex":
+        try:
+            from hermes_cli.codex_models import get_codex_model_fallbacks
+
+            agent._fallback_chain = [
+                {"provider": "openai-codex", "model": fb_model}
+                for fb_model in get_codex_model_fallbacks(agent.model)
+            ]
+        except Exception:
+            agent._fallback_chain = []
     agent._fallback_index = 0
     agent._fallback_activated = getattr(agent, "_fallback_activated", False)
     # Legacy attribute kept for backward compat (tests, external callers)
