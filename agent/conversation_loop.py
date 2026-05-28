@@ -1193,7 +1193,24 @@ def run_conversation(
                             else:
                                 # output_text fallback: stream backfill may have failed
                                 # but normalize can still recover from output_text
-                                _out_text = getattr(response, "output_text", None)
+                                try:
+                                    _out_text = getattr(response, "output_text", None)
+                                except TypeError as exc:
+                                    # openai-python's Response.output_text property
+                                    # iterates response.output; the Codex backend can
+                                    # return output=None on terminal stream frames.
+                                    # Treat that as empty output so retry/fallback
+                                    # logic stays in control instead of leaking the
+                                    # SDK helper's TypeError.
+                                    _err_text = str(exc).lower()
+                                    if "nonetype" in _err_text and "object is not iterable" in _err_text:
+                                        logger.debug(
+                                            "Codex response.output_text unavailable because response.output is None. %s",
+                                            agent._client_log_context(),
+                                        )
+                                        _out_text = None
+                                    else:
+                                        raise
                                 _out_text_stripped = _out_text.strip() if isinstance(_out_text, str) else ""
                                 if _out_text_stripped:
                                     logger.debug(

@@ -595,6 +595,45 @@ def test_run_codex_stream_fallback_uses_raw_sse_after_create_iter_unwind(monkeyp
     assert response.output[0].content[0].text == "raw ok"
 
 
+def test_run_codex_stream_fallback_synthesizes_when_terminal_output_is_none(monkeypatch):
+    agent = _build_agent(monkeypatch)
+    calls = {"stream": 0, "create": 0}
+    terminal = SimpleNamespace(
+        output=None,
+        usage=SimpleNamespace(input_tokens=5, output_tokens=3, total_tokens=8),
+        status="completed",
+        model="gpt-5-codex",
+    )
+    create_stream = _FakeCreateStream(
+        [
+            SimpleNamespace(type="response.created"),
+            SimpleNamespace(type="response.output_text.delta", delta="create "),
+            SimpleNamespace(type="response.output_text.delta", delta="ok"),
+            SimpleNamespace(type="response.completed", response=terminal),
+        ]
+    )
+
+    def _fake_stream(**kwargs):
+        calls["stream"] += 1
+        raise TypeError("'NoneType' object is not iterable")
+
+    def _fake_create(**kwargs):
+        calls["create"] += 1
+        assert kwargs["stream"] is True
+        return create_stream
+
+    agent.client = SimpleNamespace(
+        responses=SimpleNamespace(
+            stream=_fake_stream,
+            create=_fake_create,
+        )
+    )
+
+    response = agent._run_codex_stream(_codex_request_kwargs())
+    assert calls == {"stream": 2, "create": 1}
+    assert response.output[0].content[0].text == "create ok"
+
+
 def test_run_conversation_codex_plain_text(monkeypatch):
     agent = _build_agent(monkeypatch)
     monkeypatch.setattr(agent, "_interruptible_api_call", lambda api_kwargs: _codex_message_response("OK"))
@@ -655,6 +694,38 @@ def test_run_conversation_codex_empty_output_no_output_text_retries(monkeypatch)
     assert calls["api"] >= 2
     assert result["completed"] is True
     assert result["final_response"] == "Recovered"
+
+
+def test_run_conversation_codex_output_none_does_not_leak_output_text_typeerror(monkeypatch):
+    agent = _build_agent(monkeypatch)
+    calls = {"api": 0}
+
+    class _OpenAIResponseWithNoneOutput:
+        output = None
+        usage = SimpleNamespace(input_tokens=5, output_tokens=3, total_tokens=8)
+        status = "completed"
+        model = "gpt-5-codex"
+
+        @property
+        def output_text(self):
+            for output in self.output:
+                return output
+            return ""
+
+    def _fake_api_call(api_kwargs):
+        calls["api"] += 1
+        if calls["api"] == 1:
+            return _OpenAIResponseWithNoneOutput()
+        return _codex_message_response("Recovered")
+
+    monkeypatch.setattr(agent, "_interruptible_api_call", _fake_api_call)
+
+    result = agent.run_conversation("Say hello")
+
+    assert calls["api"] == 2
+    assert result["completed"] is True
+    assert result["final_response"] == "Recovered"
+    assert "NoneType" not in str(result)
 
 
 def test_run_conversation_codex_refreshes_after_401_and_retries(monkeypatch):
